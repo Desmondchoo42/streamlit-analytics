@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Union
 
 import streamlit as st
+import requests
 
 from . import display, firestore
 from .utils import replace_empty
@@ -228,6 +229,10 @@ def _wrap_value(func):
 
 def start_tracking(
     verbose: bool = False,
+    baserow_tableid: str = None,
+    baserow_action: str = None, #add,update
+    baserow_rowid: str = None,
+    baserow_token: str = None,
     firestore_key_file: str = None,
     firestore_collection_name: str = "counts",
     load_from_json: Union[str, Path] = None,
@@ -248,7 +253,19 @@ def start_tracking(
             print("Loaded count data from firestore:")
             print(counts)
             print()
-
+    if baserow_tableid is not None and baserow_token is not None:
+        r = requests.get(
+            "https://api.baserow.io/api/database/rows/table/{baserow_tableid}/?user_field_names=true",
+            headers={
+                "Authorization": f"Token {baserow_token}"
+            }
+        )
+        
+        json_counts = eval(r.json()['results'][0]['Name'].replace("'",'"'))
+        for key in json_counts:
+            if key in counts:
+                counts[key] = json_counts[key]
+        
     if load_from_json is not None:
         if verbose:
             print(f"Loading counts from json:", load_from_json)
@@ -331,6 +348,10 @@ def start_tracking(
 def stop_tracking(
     unsafe_password: str = None,
     save_to_json: Union[str, Path] = None,
+    baserow_tableid: str = None,
+    baserow_action: str = None, #add,update
+    baserow_rowid: str = None,
+    baserow_token: str = None,
     firestore_key_file: str = None,
     firestore_collection_name: str = "counts",
     verbose: bool = False,
@@ -389,7 +410,36 @@ def stop_tracking(
             print(counts)
             print()
         firestore.save(counts, firestore_key_file, firestore_collection_name)
-
+    
+    # Save count data to firestore.
+    if baserow_tableid is not None and baserow_token is not None:
+        if verbose:
+            print("Saving count data to firestore:")
+            print(counts)
+            print()
+        if baserow_action == "update":
+            requests.patch(
+                f"https://api.baserow.io/api/database/rows/table/{baserow_tableid}/{baserow_rowid}/?user_field_names=true",
+                headers={
+                    "Authorization": f"Token {baserow_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "Name": str(counts)
+                }
+            )
+        else:
+            requests.post(
+                f"https://api.baserow.io/api/database/rows/table/{baserow_tableid}/?user_field_names=true",
+                headers={
+                    "Authorization": f"Token {baserow_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "Name": str(counts)
+                }
+            )
+            
     # Dump the counts to json file if `save_to_json` is set.
     # TODO: Make sure this is not locked if writing from multiple threads.
     if save_to_json is not None:
